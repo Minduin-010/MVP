@@ -1,0 +1,862 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SONDA — o roteador que mapeia sua casa por dentro</title>
+<meta name="description" content="Um roteador com sensor ultrassônico giratório que mede distâncias, paredes e vidro, cruza com o sinal Wi-Fi real e mostra no app exatamente onde e por que sua rede cai.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg: #EDEFF2;
+    --panel: #FFFFFF;
+    --panel-edge: #D8DCE2;
+    --ink: #12161C;
+    --muted: #5B6472;
+    --muted-2: #8B93A1;
+    --accent: #0F9E96;
+    --accent-dim: #0F9E961a;
+    --accent-line: #0F9E9640;
+    --good: #1E8E5A;
+    --good-dim: #1E8E5A1a;
+    --warn: #C77618;
+    --warn-dim: #C776181a;
+    --bad: #C43D3D;
+    --bad-dim: #C43D3D1a;
+    --idle: #B7BFC9;
+    --display: 'Barlow Condensed', sans-serif;
+    --body: 'Inter', sans-serif;
+    --mono: 'JetBrains Mono', monospace;
+    --radius: 10px;
+  }
+
+  *{ box-sizing: border-box; margin:0; padding:0; }
+  html{ scroll-behavior: smooth; }
+  body{
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--body);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  img,svg{ display:block; }
+  a{ color: inherit; }
+  .sr-only{
+    position:absolute; width:1px; height:1px; padding:0; margin:-1px;
+    overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0;
+  }
+
+  .wrap{ max-width: 1120px; margin: 0 auto; padding: 0 28px; }
+
+  .grid-bg{
+    position: fixed; inset: 0; z-index: -1;
+    background-image:
+      linear-gradient(var(--panel-edge) 1px, transparent 1px),
+      linear-gradient(90deg, var(--panel-edge) 1px, transparent 1px);
+    background-size: 42px 42px;
+    opacity: 0.35;
+    mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, black 40%, transparent 90%);
+  }
+
+  header.site{
+    position: sticky; top: 0; z-index: 20;
+    background: rgba(237,239,242,0.86);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--panel-edge);
+  }
+  .nav{
+    display:flex; align-items:center; justify-content: space-between;
+    padding: 16px 28px; max-width: 1120px; margin: 0 auto;
+  }
+  .brand{
+    display:flex; align-items:center; gap:10px;
+    font-family: var(--display); font-weight: 700; font-size: 20px; letter-spacing: 0.4px;
+  }
+  .brand .led{
+    width:9px; height:9px; border-radius:50%;
+    background: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-dim);
+    animation: blink 2.4s ease-in-out infinite;
+  }
+  .nav-links{ display:flex; gap: 24px; font-size: 13.5px; color: var(--muted); font-weight: 500; }
+  .nav-links a{ text-decoration:none; }
+  .nav-links a:hover{ color: var(--ink); }
+  .nav-links a:focus-visible, button:focus-visible, .cta:focus-visible{
+    outline: 2px solid var(--accent); outline-offset: 3px;
+  }
+  @media (max-width: 860px){ .nav-links{ display:none; } }
+
+  .hero{ padding: 76px 0 60px; }
+  .hero-grid{ display:grid; grid-template-columns: 1.05fr 0.95fr; gap: 56px; align-items: center; }
+  @media (max-width: 900px){
+    .hero-grid{ grid-template-columns: 1fr; gap: 40px; }
+    .hero{ padding: 44px 0 40px; }
+  }
+
+  .eyebrow{
+    display:inline-flex; align-items:center; gap:8px;
+    font-family: var(--mono); font-size: 12px; letter-spacing: 0.06em;
+    color: var(--accent); background: var(--accent-dim); border: 1px solid var(--accent-line);
+    padding: 5px 10px; border-radius: 100px; margin-bottom: 22px; text-transform: uppercase;
+  }
+
+  h1{
+    font-family: var(--display); font-weight: 700;
+    font-size: clamp(36px, 5vw, 56px); line-height: 1.03; letter-spacing: -0.01em; margin-bottom: 20px;
+  }
+  h1 em{ font-style: normal; color: var(--accent); }
+
+  .lede{ font-size: 17px; color: var(--muted); max-width: 48ch; margin-bottom: 30px; }
+
+  .cta-row{ display:flex; gap:14px; flex-wrap: wrap; }
+  .cta{
+    display:inline-flex; align-items:center; gap:8px;
+    background: var(--ink); color: #fff; font-weight: 600; font-size: 14.5px;
+    padding: 13px 22px; border-radius: 8px; text-decoration: none; border: none; cursor: pointer;
+    transition: transform .15s ease, background .15s ease;
+  }
+  .cta:hover{ background: #2A323D; transform: translateY(-1px); }
+  .cta:disabled{ opacity: .6; cursor: default; transform:none; }
+  .cta.ghost{ background: transparent; color: var(--ink); border: 1px solid var(--panel-edge); }
+  .cta.ghost:hover{ background: var(--panel); }
+
+  /* ---------- Router panel (hero) ---------- */
+  .router-panel{
+    background: var(--panel); border: 1px solid var(--panel-edge); border-radius: 14px;
+    padding: 26px 26px 22px; box-shadow: 0 1px 2px rgba(18,22,28,0.04), 0 12px 32px -18px rgba(18,22,28,0.18);
+  }
+  .router-panel .rp-top{ display:flex; justify-content: space-between; align-items:center; margin-bottom: 18px; }
+  .rp-title{ font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em; color: var(--muted-2); text-transform: uppercase; }
+  .rp-status{ font-family: var(--mono); font-size: 11px; color: var(--accent); display:flex; align-items:center; gap:6px; }
+  .rp-status .dot{ width:7px;height:7px;border-radius:50%; background: var(--accent); animation: blink 1.8s ease-in-out infinite; }
+
+  .led-rows{ display:flex; flex-direction:column; gap: 10px; margin-bottom: 18px; }
+  .led-row{
+    display:flex; align-items:center; justify-content: space-between;
+    padding: 9px 12px; background: var(--bg); border-radius: 7px; font-family: var(--mono); font-size: 12.5px;
+  }
+  .led-row .label{ color: var(--muted); display:flex; align-items:center; gap:9px; }
+  .led-row .lamp{ width:8px; height:8px; border-radius:50%; background: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }
+  .led-row .lamp.slow{ animation: blink 1.1s steps(2) infinite; }
+  .led-row .val{ color: var(--ink); font-weight: 600; }
+
+  .radar-box{ background: var(--bg); border-radius: 8px; padding: 10px; }
+  .radar-box svg{ width:100%; height: 120px; }
+  .sweep-group{
+    transform-origin: 60px 60px;
+    transform-box: fill-box;
+    animation: sweep 3.6s linear infinite;
+  }
+  .sweep-blip{ animation: blip-fade 3.6s linear infinite; opacity:0; }
+  .sweep-blip.b2{ animation-delay: 1.9s; }
+  @keyframes sweep{ to{ transform: rotate(360deg); } }
+  @keyframes blip-fade{
+    0%,100%{ opacity:0; } 27%{ opacity:0; } 30%{ opacity:1; } 40%{ opacity:0; }
+  }
+
+  @keyframes blink{ 0%,100%{ opacity:1; } 50%{ opacity:.25; } }
+
+  /* ---------- Section shell ---------- */
+  section{ padding: 76px 0; border-top: 1px solid var(--panel-edge); }
+  .section-head{ max-width: 64ch; margin-bottom: 44px; }
+  .kicker{
+    font-family: var(--mono); font-size: 12px; color: var(--accent); text-transform: uppercase;
+    letter-spacing: 0.08em; margin-bottom: 10px; display:block;
+  }
+  h2{ font-family: var(--display); font-weight: 700; font-size: clamp(28px, 3.6vw, 38px); letter-spacing: -0.01em; margin-bottom: 12px; }
+  .section-head p{ color: var(--muted); font-size: 15.5px; max-width: 58ch; }
+
+  /* ---------- Reading cards ---------- */
+  .readings{ display:grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+  @media (max-width: 800px){ .readings{ grid-template-columns: 1fr; } }
+  .reading-card{ background: var(--panel); border: 1px solid var(--panel-edge); border-radius: var(--radius); padding: 24px 22px; }
+  .reading-card .rc-head{ display:flex; align-items:center; gap:10px; margin-bottom: 14px; }
+  .rc-icon{
+    width: 30px; height: 30px; border-radius: 7px; background: var(--accent-dim);
+    display:flex; align-items:center; justify-content:center; color: var(--accent); font-size: 15px;
+  }
+  .reading-card h3{ font-family: var(--display); font-weight: 600; font-size: 19px; }
+  .reading-card p{ color: var(--muted); font-size: 14.5px; }
+  .reading-card .metric{
+    font-family: var(--mono); font-size: 12px; color: var(--muted-2);
+    margin-top: 14px; padding-top: 14px; border-top: 1px dashed var(--panel-edge);
+  }
+
+  /* ---------- Causes grid ---------- */
+  .causes{ display:grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+  @media (max-width: 800px){ .causes{ grid-template-columns: 1fr; } }
+  .cause-card{
+    background: var(--panel); border: 1px solid var(--panel-edge); border-radius: var(--radius);
+    padding: 22px; display:grid; grid-template-columns: 40px 1fr; gap: 16px; align-items:start;
+  }
+  .cause-icon{
+    width: 40px; height: 40px; border-radius: 8px; background: var(--bg);
+    display:flex; align-items:center; justify-content:center; color: var(--accent);
+    font-family: var(--mono); font-weight: 700; font-size: 13px; border: 1px solid var(--panel-edge);
+  }
+  .cause-card h4{ font-family: var(--display); font-weight: 600; font-size: 18px; margin-bottom: 4px; }
+  .cause-card p{ color: var(--muted); font-size: 14px; }
+
+  /* ---------- Demo / floor plan ---------- */
+  .demo-panel{ background: var(--panel); border: 1px solid var(--panel-edge); border-radius: 14px; padding: 32px; }
+  @media (max-width: 720px){ .demo-panel{ padding: 20px; } }
+
+  .demo-top{ display:flex; justify-content: space-between; align-items: center; margin-bottom: 22px; flex-wrap: wrap; gap: 14px; }
+  .demo-note{ font-family: var(--mono); font-size: 11.5px; color: var(--muted-2); }
+
+  .floorplan-wrap{ background: var(--bg); border-radius: 10px; padding: 14px; margin-bottom: 24px; }
+  .floorplan-wrap svg{ width:100%; height:auto; display:block; }
+
+  .room-label{ font-family: var(--mono); font-size: 10.5px; fill: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  .room-sub{ font-family: var(--mono); font-size: 9px; fill: var(--muted-2); }
+  .dist-label{ font-family: var(--mono); font-size: 9.5px; fill: var(--muted); }
+  .verdict-dot{ fill: var(--idle); transition: fill .3s ease; }
+  .verdict-dot.good{ fill: var(--good); }
+  .verdict-dot.warn{ fill: var(--warn); }
+  .verdict-dot.bad{ fill: var(--bad); }
+  .dist-line{ stroke: var(--muted-2); stroke-width: 1.3; stroke-dasharray: 4 4; fill:none; stroke-dashoffset: 0; opacity: .55; }
+  .obstacle-tag{ font-family: var(--mono); font-size: 8.5px; fill: var(--bad); }
+
+  .router-mark{ fill: var(--accent); }
+  .ping-ring{
+    fill:none; stroke: var(--accent); stroke-width: 1.5; opacity: 0;
+    transform-origin: center; transform-box: fill-box;
+    animation: ping 3s ease-out infinite;
+  }
+  .ping-ring.r2{ animation-delay: 1s; }
+  .ping-ring.r3{ animation-delay: 2s; }
+  @keyframes ping{
+    0%{ transform: scale(0.2); opacity: .55; }
+    80%{ opacity: 0; }
+    100%{ transform: scale(1); opacity: 0; }
+  }
+
+  .glass-hatch{ fill: url(#glassPattern); opacity: .8; }
+  .wall-thick{ stroke: var(--muted-2); stroke-width: 5; }
+
+  .metrics-row{ display:grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; margin-bottom: 24px; }
+  @media (max-width: 720px){ .metrics-row{ grid-template-columns: 1fr; } }
+  .metric-box{ background: var(--bg); border-radius: 10px; padding: 20px; text-align: center; }
+  .metric-box .m-label{ font-family: var(--mono); font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 10px; }
+  .metric-box .m-value{ font-family: var(--mono); font-weight: 700; font-size: 30px; color: var(--ink); line-height: 1; }
+  .metric-box .m-unit{ font-family: var(--mono); font-size: 12px; color: var(--muted-2); margin-top: 6px; }
+
+  .verdict{
+    display:flex; align-items:center; gap: 14px; padding: 16px 18px; border-radius: 10px;
+    background: var(--accent-dim); border: 1px solid var(--accent-line); margin-bottom: 22px;
+    transition: background .3s ease, border-color .3s ease;
+  }
+  .verdict .v-dot{ width: 12px; height:12px; border-radius:50%; background: var(--accent); flex-shrink:0; }
+  .verdict .v-text strong{ display:block; font-size: 15px; margin-bottom: 2px; }
+  .verdict .v-text span{ font-size: 13px; color: var(--muted); }
+
+  .run-row{ display:flex; align-items:center; gap: 16px; flex-wrap: wrap; }
+  .progress-track{ flex: 1; min-width: 160px; height: 6px; background: var(--bg); border-radius: 4px; overflow: hidden; }
+  .progress-fill{ height: 100%; width: 0%; background: var(--accent); border-radius: 4px; transition: width .12s linear; }
+
+  /* ---------- Threshold cards ---------- */
+  .thresh{ display:grid; grid-template-columns: repeat(3,1fr); gap: 18px; }
+  @media (max-width: 800px){ .thresh{ grid-template-columns: 1fr; } }
+  .thresh-card{ border-radius: var(--radius); padding: 22px; border: 1px solid; }
+  .thresh-card.good{ background: var(--good-dim); border-color: #1E8E5A40; }
+  .thresh-card.warn{ background: var(--warn-dim); border-color: #C7761840; }
+  .thresh-card.bad{ background: var(--bad-dim); border-color: #C43D3D40; }
+  .thresh-card .tc-tag{ font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; margin-bottom: 10px; display:block; }
+  .thresh-card.good .tc-tag{ color: var(--good); }
+  .thresh-card.warn .tc-tag{ color: var(--warn); }
+  .thresh-card.bad .tc-tag{ color: var(--bad); }
+  .thresh-card h4{ font-family: var(--display); font-weight: 600; font-size: 20px; margin-bottom: 8px; }
+  .thresh-card p{ font-size: 14px; color: var(--muted); }
+  .thresh-card .tc-range{ font-family: var(--mono); font-size: 13px; color: var(--ink); margin-top: 12px; font-weight: 600; }
+
+  /* ---------- App section ---------- */
+  .app-grid{ display:grid; grid-template-columns: 0.9fr 1.1fr; gap: 48px; align-items:center; }
+  @media (max-width: 900px){ .app-grid{ grid-template-columns: 1fr; gap: 32px; } }
+  .phone{
+    background: var(--ink); border-radius: 28px; padding: 10px; width: 240px; margin: 0 auto;
+    box-shadow: 0 20px 44px -20px rgba(18,22,28,0.35);
+  }
+  .phone-screen{ background: var(--panel); border-radius: 20px; padding: 16px 14px; }
+  .phone-head{ display:flex; justify-content: space-between; align-items:center; margin-bottom: 12px; }
+  .phone-head .ph-title{ font-family: var(--display); font-weight:700; font-size: 15px; }
+  .phone-head .ph-dot{ width:7px;height:7px;border-radius:50%; background: var(--accent); }
+  .phone-map{ background: var(--bg); border-radius: 10px; padding: 10px; margin-bottom: 12px; }
+  .phone-map svg{ width:100%; height:auto; }
+  .phone-list{ display:flex; flex-direction:column; gap:7px; }
+  .phone-row{
+    display:flex; justify-content: space-between; align-items:center;
+    font-family: var(--mono); font-size: 10.5px; background: var(--bg); border-radius: 6px; padding: 7px 9px;
+  }
+  .phone-row .pr-dot{ width:6px;height:6px;border-radius:50%; margin-right:6px; display:inline-block; }
+
+  .app-features{ display:flex; flex-direction:column; gap: 22px; }
+  .app-feature{ display:grid; grid-template-columns: 34px 1fr; gap: 14px; }
+  .app-feature .af-icon{
+    width:34px; height:34px; border-radius: 8px; background: var(--accent-dim); color: var(--accent);
+    display:flex; align-items:center; justify-content:center; font-family: var(--mono); font-weight:700; font-size:13px;
+  }
+  .app-feature h4{ font-family: var(--display); font-weight:600; font-size: 18px; margin-bottom: 3px; }
+  .app-feature p{ color: var(--muted); font-size: 14px; }
+
+  /* ---------- Troubleshooting steps ---------- */
+  .steps{ display:flex; flex-direction: column; gap: 0; }
+  .step{ display:grid; grid-template-columns: 56px 1fr; gap: 20px; padding: 24px 0; border-top: 1px solid var(--panel-edge); }
+  .step:last-child{ border-bottom: 1px solid var(--panel-edge); }
+  .step-num{ font-family: var(--mono); font-size: 13px; color: var(--accent); font-weight: 700; padding-top: 2px; }
+  .step h4{ font-family: var(--display); font-weight: 600; font-size: 20px; margin-bottom: 6px; }
+  .step p{ color: var(--muted); font-size: 14.5px; max-width: 62ch; }
+
+  /* ---------- Footer ---------- */
+  footer{ padding: 40px 0 50px; border-top: 1px solid var(--panel-edge); }
+  .foot-row{ display:flex; justify-content: space-between; align-items:center; flex-wrap: wrap; gap: 14px; }
+  .foot-row p{ font-size: 13px; color: var(--muted-2); }
+  .foot-brand{ font-family: var(--mono); font-size: 12px; color: var(--muted); display:flex; align-items:center; gap:8px; }
+  .foot-brand .led{ width:7px;height:7px;border-radius:50%; background: var(--accent); }
+
+  @media (prefers-reduced-motion: reduce){
+    *{ animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
+  }
+</style>
+</head>
+<body>
+
+<div class="grid-bg" aria-hidden="true"></div>
+
+<header class="site">
+  <div class="nav">
+    <div class="brand"><span class="led" aria-hidden="true"></span> SONDA</div>
+    <nav class="nav-links">
+      <a href="#como-funciona">Como funciona</a>
+      <a href="#mapa">Ver o mapa</a>
+      <a href="#causas">Causas comuns</a>
+      <a href="#app">Aplicativo</a>
+      <a href="#resolver">Como resolver</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <!-- HERO -->
+  <section class="hero" style="border-top:none;">
+    <div class="wrap hero-grid">
+      <div>
+        <span class="eyebrow">● sensor ultrassônico ativo</span>
+        <h1>O Wi-Fi não some.<br>Ele <em>bate</em> em alguma coisa.</h1>
+        <p class="lede">Todo roteador mostra a velocidade. Nenhum mostra por que ela cai justo no quarto do fundo. A SONDA tem um sensor ultrassônico giratório que mede fisicamente sua casa — distância, paredes, vidro — e cruza isso com o sinal Wi-Fi real, cômodo por cômodo.</p>
+        <div class="cta-row">
+          <a href="#mapa" class="cta">Ver o mapa de uma casa</a>
+          <a href="#como-funciona" class="cta ghost">Como funciona a varredura</a>
+        </div>
+      </div>
+
+      <div class="router-panel">
+        <div class="rp-top">
+          <span class="rp-title">Painel do roteador</span>
+          <span class="rp-status"><span class="dot"></span> varrendo</span>
+        </div>
+        <div class="led-rows">
+          <div class="led-row">
+            <span class="label"><span class="lamp slow"></span> Sensor ultrassônico</span>
+            <span class="val">Girando 360°</span>
+          </div>
+          <div class="led-row">
+            <span class="label"><span class="lamp"></span> Cômodos mapeados</span>
+            <span class="val">4 de 5</span>
+          </div>
+          <div class="led-row">
+            <span class="label"><span class="lamp"></span> Obstáculo mais recente</span>
+            <span class="val">Vidro, 4,6 m</span>
+          </div>
+        </div>
+        <div class="radar-box" aria-hidden="true">
+          <svg viewBox="0 0 120 120">
+            <circle cx="60" cy="60" r="52" fill="none" stroke="var(--panel-edge)" stroke-width="1"/>
+            <circle cx="60" cy="60" r="34" fill="none" stroke="var(--panel-edge)" stroke-width="1"/>
+            <circle cx="60" cy="60" r="16" fill="none" stroke="var(--panel-edge)" stroke-width="1"/>
+            <circle class="sweep-blip" cx="88" cy="34" r="3" fill="var(--warn)"/>
+            <circle class="sweep-blip b2" cx="30" cy="82" r="3" fill="var(--bad)"/>
+            <g class="sweep-group">
+              <line x1="60" y1="60" x2="60" y2="8" stroke="var(--accent)" stroke-width="2" stroke-linecap="round"/>
+            </g>
+            <circle cx="60" cy="60" r="3.5" fill="var(--accent)"/>
+          </svg>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- COMO FUNCIONA -->
+  <section id="como-funciona">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="kicker">O básico</span>
+        <h2>Duas leituras, um único mapa</h2>
+        <p>A SONDA não adivinha por que o sinal cai — ela mede duas coisas ao mesmo tempo, em cada direção, e cruza os resultados.</p>
+      </div>
+
+      <div class="readings">
+        <div class="reading-card">
+          <div class="rc-head">
+            <span class="rc-icon" aria-hidden="true">◎</span>
+            <h3>Varredura ultrassônica</h3>
+          </div>
+          <p>O sensor gira 360° emitindo pulsos de som inaudíveis e mede a distância exata até paredes, móveis e portas em cada direção da casa.</p>
+          <div class="metric">medido em centímetros, a cada 2° de giro</div>
+        </div>
+        <div class="reading-card">
+          <div class="rc-head">
+            <span class="rc-icon" aria-hidden="true">∿</span>
+            <h3>Leitura do sinal Wi-Fi</h3>
+          </div>
+          <p>No mesmo instante, o roteador testa a força do sinal em 2,4GHz e 5GHz naquela direção e compara com o que era esperado para aquela distância.</p>
+          <div class="metric">medido em dBm (força do sinal)</div>
+        </div>
+        <div class="reading-card">
+          <div class="rc-head">
+            <span class="rc-icon" aria-hidden="true">▦</span>
+            <h3>Cruzamento no aplicativo</h3>
+          </div>
+          <p>O app conecta ao roteador e junta as duas leituras: onde a queda de sinal bate com um obstáculo físico — e onde não bate, apontando outro aparelho como causa.</p>
+          <div class="metric">atualizado a cada nova varredura</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- MAPA / DEMO -->
+  <section id="mapa">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="kicker">Na prática</span>
+        <h2>Sua casa, vista pelo sensor</h2>
+        <p>Esta é uma simulação de como o mapa aparece no aplicativo após uma varredura: cada cômodo recebe um veredito com base no que o sensor e o Wi-Fi encontraram juntos.</p>
+      </div>
+
+      <div class="demo-panel">
+        <div class="demo-top">
+          <span class="rp-status"><span class="dot"></span> pronto para varrer</span>
+          <span class="demo-note">planta ilustrativa — não mede sua casa real</span>
+        </div>
+
+        <div class="floorplan-wrap">
+          <svg viewBox="0 0 560 380" role="img" aria-label="Planta baixa simulada com cinco cômodos ao redor do roteador, cada um com um indicador de sinal">
+            <defs>
+              <pattern id="glassPattern" width="8" height="8" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
+                <line x1="0" y1="0" x2="0" y2="8" stroke="var(--accent)" stroke-width="2" opacity="0.35"/>
+              </pattern>
+            </defs>
+
+            <!-- Rooms -->
+            <rect x="16" y="16" width="160" height="164" rx="4" fill="var(--panel)" stroke="var(--panel-edge)" stroke-width="2"/>
+            <rect x="192" y="16" width="180" height="164" rx="4" fill="var(--panel)" stroke="var(--panel-edge)" stroke-width="2"/>
+            <rect x="388" y="16" width="156" height="164" rx="4" fill="var(--panel)" stroke="var(--panel-edge)" stroke-width="2" class="wall-thick"/>
+            <rect x="16" y="196" width="250" height="168" rx="4" fill="var(--panel)" stroke="var(--panel-edge)" stroke-width="2"/>
+            <rect x="282" y="196" width="262" height="168" rx="4" fill="var(--panel)" stroke="var(--panel-edge)" stroke-width="2"/>
+
+            <!-- Glass window on Quarto 2 outer wall -->
+            <rect x="196" y="12" width="172" height="7" class="glass-hatch"/>
+
+            <!-- Microwave icon in kitchen -->
+            <g transform="translate(494,214)" aria-hidden="true">
+              <rect x="0" y="0" width="26" height="18" rx="2" fill="none" stroke="var(--muted-2)" stroke-width="1.5"/>
+              <path d="M4,9 q4,-6 8,0 q4,6 8,0" fill="none" stroke="var(--bad)" stroke-width="1.3"/>
+            </g>
+
+            <!-- Distance lines from router -->
+            <path id="line-quarto1" class="dist-line" d="M90,300 L96,98"/>
+            <path id="line-cozinha" class="dist-line" d="M90,300 L360,280"/>
+            <path id="line-quarto2" class="dist-line" d="M90,300 L282,98"/>
+            <path id="line-escritorio" class="dist-line" d="M90,300 L466,98"/>
+
+            <text x="140" y="200" class="dist-label" text-anchor="middle">2,4 m</text>
+            <text x="260" y="312" class="dist-label" text-anchor="middle">3,0 m</text>
+            <text x="230" y="212" class="dist-label" text-anchor="middle">4,6 m</text>
+            <text x="330" y="200" class="dist-label" text-anchor="middle">6,8 m</text>
+
+            <!-- Ping rings from router -->
+            <g aria-hidden="true">
+              <circle class="ping-ring" cx="90" cy="300" r="30"/>
+              <circle class="ping-ring r2" cx="90" cy="300" r="30"/>
+              <circle class="ping-ring r3" cx="90" cy="300" r="30"/>
+            </g>
+
+            <!-- Router marker -->
+            <circle class="router-mark" cx="90" cy="300" r="6"/>
+            <text x="102" y="304" class="room-sub">roteador</text>
+
+            <!-- Room labels + verdict dots -->
+            <text x="30" y="38" class="room-label">Quarto 1</text>
+            <text x="30" y="50" class="room-sub">parede fina de gesso</text>
+            <circle id="dot-quarto1" class="verdict-dot" cx="160" cy="32" r="6"/>
+
+            <text x="206" y="38" class="room-label">Quarto 2</text>
+            <text x="206" y="50" class="room-sub">janela grande na parede</text>
+            <text x="206" y="62" class="obstacle-tag">vidro atenua o sinal</text>
+            <circle id="dot-quarto2" class="verdict-dot" cx="356" cy="32" r="6"/>
+
+            <text x="402" y="38" class="room-label">Escritório</text>
+            <text x="402" y="50" class="room-sub">parede de concreto</text>
+            <circle id="dot-escritorio" class="verdict-dot" cx="528" cy="32" r="6"/>
+
+            <text x="30" y="218" class="room-label">Sala</text>
+            <text x="30" y="230" class="room-sub">roteador fica aqui</text>
+            <circle id="dot-sala" class="verdict-dot good" cx="250" cy="212" r="6"/>
+
+            <text x="298" y="218" class="room-label">Cozinha</text>
+            <text x="298" y="230" class="room-sub">micro-ondas em uso</text>
+            <text x="298" y="242" class="obstacle-tag">2,4GHz sobrepõe o canal</text>
+            <circle id="dot-cozinha" class="verdict-dot" cx="528" cy="212" r="6"/>
+          </svg>
+        </div>
+
+        <div class="metrics-row">
+          <div class="metric-box">
+            <div class="m-label">Cômodos mapeados</div>
+            <div class="m-value" id="rooms-val">0</div>
+            <div class="m-unit">de 5</div>
+          </div>
+          <div class="metric-box">
+            <div class="m-label">Obstáculos encontrados</div>
+            <div class="m-value" id="obstacles-val">0</div>
+            <div class="m-unit">vidro, concreto, 2,4GHz</div>
+          </div>
+          <div class="metric-box">
+            <div class="m-label">Pior cômodo</div>
+            <div class="m-value" id="worst-val" style="font-size:22px;">—</div>
+            <div class="m-unit">sinal mais comprometido</div>
+          </div>
+        </div>
+
+        <div class="verdict" id="verdict-box">
+          <span class="v-dot" id="verdict-dot"></span>
+          <div class="v-text">
+            <strong id="verdict-title">Aguardando varredura</strong>
+            <span id="verdict-sub">Clique em "Iniciar varredura" para simular o sensor mapeando os cinco cômodos.</span>
+          </div>
+        </div>
+
+        <div class="run-row">
+          <button class="cta" id="run-btn">Iniciar varredura</button>
+          <div class="progress-track"><div class="progress-fill" id="progress-fill"></div></div>
+        </div>
+        <p class="sr-only" id="scan-summary" aria-live="polite"></p>
+      </div>
+    </div>
+  </section>
+
+  <!-- CAUSAS COMUNS -->
+  <section id="causas">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="kicker">Leitura dos resultados</span>
+        <h2>Distância sozinha não explica nada</h2>
+        <p>Um cômodo perto do roteador pode ter sinal ruim, e um cômodo longe pode ter sinal ótimo. O que decide é o que está no caminho.</p>
+      </div>
+
+      <div class="causes">
+        <div class="cause-card">
+          <span class="cause-icon" aria-hidden="true">❚❚</span>
+          <div>
+            <h4>Distância e paredes grossas</h4>
+            <p>Concreto e alvenaria dupla absorvem sinal de verdade — mais do que a distância em si. O sensor mede a espessura aproximada de cada parede pelo tempo de retorno do eco.</p>
+          </div>
+        </div>
+        <div class="cause-card">
+          <span class="cause-icon" aria-hidden="true">◇</span>
+          <div>
+            <h4>Vidro e espelhos</h4>
+            <p>Janelas grandes e espelhos refletem parte do sinal e dispersam o resto. Quartos com fachada de vidro costumam medir bem mais fracos do que a distância sugere.</p>
+          </div>
+        </div>
+        <div class="cause-card">
+          <span class="cause-icon" aria-hidden="true">2.4G</span>
+          <div>
+            <h4>Aparelhos que operam em 2,4GHz</h4>
+            <p>Micro-ondas, babás eletrônicas e alguns telefones sem fio disputam a mesma faixa de frequência do Wi-Fi. A queda costuma ser pontual — só enquanto o aparelho está ligado.</p>
+          </div>
+        </div>
+        <div class="cause-card">
+          <span class="cause-icon" aria-hidden="true">≋</span>
+          <div>
+            <h4>Roteadores vizinhos no mesmo canal</h4>
+            <p>Em prédios e casas geminadas, redes próximas competem pelo mesmo canal. O sensor não enxerga essa causa fisicamente — o app sinaliza quando a queda não bate com nenhum obstáculo detectado.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- INTERPRETAR -->
+  <section id="interpretar">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="kicker">Vereditos</span>
+        <h2>Como o app classifica cada cômodo</h2>
+        <p>Cada cômodo recebe um veredito combinando a leitura de sinal com o obstáculo físico encontrado na mesma direção.</p>
+      </div>
+
+      <div class="thresh">
+        <div class="thresh-card good">
+          <span class="tc-tag">Sinal bom</span>
+          <h4>Sem obstáculo relevante</h4>
+          <p>A distância medida pelo sensor explica totalmente a força do sinal. Nada para corrigir nesse cômodo.</p>
+          <div class="tc-range">linha de visada limpa ou parede fina</div>
+        </div>
+        <div class="thresh-card warn">
+          <span class="tc-tag">Instável</span>
+          <h4>Obstáculo intermitente</h4>
+          <p>A queda de sinal coincide com um aparelho de 2,4GHz detectado próximo — o problema some quando ele é desligado.</p>
+          <div class="tc-range">ex.: micro-ondas, babá eletrônica</div>
+        </div>
+        <div class="thresh-card bad">
+          <span class="tc-tag">Comprometido</span>
+          <h4>Obstáculo físico permanente</h4>
+          <p>A queda de sinal bate com um vidro, espelho ou parede espessa na mesma direção — reposicionar sozinho não resolve.</p>
+          <div class="tc-range">ex.: vidro, concreto, metal</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- APP -->
+  <section id="app">
+    <div class="wrap app-grid">
+      <div class="phone" aria-hidden="true">
+        <div class="phone-screen">
+          <div class="phone-head">
+            <span class="ph-title">Mapa</span>
+            <span class="ph-dot"></span>
+          </div>
+          <div class="phone-map">
+            <svg viewBox="0 0 200 140">
+              <rect x="6" y="6" width="88" height="60" rx="3" fill="var(--panel)" stroke="var(--panel-edge)"/>
+              <rect x="104" y="6" width="90" height="60" rx="3" fill="var(--panel)" stroke="var(--panel-edge)"/>
+              <rect x="6" y="74" width="90" height="60" rx="3" fill="var(--panel)" stroke="var(--panel-edge)"/>
+              <rect x="104" y="74" width="90" height="60" rx="3" fill="var(--panel)" stroke="var(--panel-edge)"/>
+              <circle cx="40" cy="100" r="5" fill="var(--good)"/>
+              <circle cx="140" cy="100" r="5" fill="var(--warn)"/>
+              <circle cx="50" cy="36" r="5" fill="var(--good)"/>
+              <circle cx="150" cy="36" r="5" fill="var(--bad)"/>
+            </svg>
+          </div>
+          <div class="phone-list">
+            <div class="phone-row"><span><span class="pr-dot" style="background:var(--bad)"></span>Quarto 2</span><span>vidro</span></div>
+            <div class="phone-row"><span><span class="pr-dot" style="background:var(--warn)"></span>Cozinha</span><span>2,4GHz</span></div>
+            <div class="phone-row"><span><span class="pr-dot" style="background:var(--good)"></span>Sala</span><span>ok</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <span class="kicker">O aplicativo</span>
+        <h2>O sensor mede. O app explica.</h2>
+        <p style="color:var(--muted); font-size:15.5px; max-width:56ch; margin-bottom:28px;">O roteador faz a varredura sozinho, mas o resultado só existe conectado ao app — é ele quem transforma pulsos ultrassônicos e leituras de sinal em um mapa que faz sentido.</p>
+
+        <div class="app-features">
+          <div class="app-feature">
+            <span class="af-icon" aria-hidden="true">▦</span>
+            <div>
+              <h4>Mapa de calor por cômodo</h4>
+              <p>Veja a planta da casa colorida por veredito, atualizada a cada nova varredura — sem precisar entender dBm ou frequência.</p>
+            </div>
+          </div>
+          <div class="app-feature">
+            <span class="af-icon" aria-hidden="true">!</span>
+            <div>
+              <h4>Alertas de novo obstáculo</h4>
+              <p>Se um cômodo piora de repente, o app aponta se é um aparelho ligado, um móvel novo no caminho, ou algo fora do alcance do sensor.</p>
+            </div>
+          </div>
+          <div class="app-feature">
+            <span class="af-icon" aria-hidden="true">→</span>
+            <div>
+              <h4>Sugestão de posição</h4>
+              <p>Com base no mapa físico da casa, o app sugere onde reposicionar o roteador ou colocar um ponto de extensão.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- RESOLVER -->
+  <section id="resolver">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="kicker">Solução de problemas</span>
+        <h2>Com o mapa em mãos, siga nesta ordem</h2>
+        <p>Cada etapa usa uma informação que só a varredura física dá — não é tentativa e erro.</p>
+      </div>
+
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">01</div>
+          <div>
+            <h4>Reposicione o roteador com base no mapa</h4>
+            <p>Coloque-o no centro das áreas mais usadas, com linha de visada livre — não escondido atrás de armários ou dentro de nichos fechados.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">02</div>
+          <div>
+            <h4>Afaste os aparelhos de 2,4GHz identificados</h4>
+            <p>Se a varredura apontou um micro-ondas ou babá eletrônica como causa, mude o roteador de cômodo ou force o dispositivo a operar em 5GHz.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">03</div>
+          <div>
+            <h4>Adicione um ponto de extensão nos cômodos "comprometidos"</h4>
+            <p>Se o obstáculo é físico — vidro, concreto — reposicionar o roteador principal raramente resolve. Um repetidor ou nó mesh naquele cômodo funciona melhor.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">04</div>
+          <div>
+            <h4>Rode uma nova varredura depois de qualquer mudança</h4>
+            <p>Um móvel novo, uma porta trocada ou um aparelho a mais alteram o mapa. Refazer a varredura confirma se a mudança realmente ajudou.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">05</div>
+          <div>
+            <h4>Compare o mapa com o uso real da casa</h4>
+            <p>Sinal fraco no closet não importa. O mesmo sinal no home office ou na sala de streaming, importa muito — priorize por aí.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">06</div>
+          <div>
+            <h4>Use o histórico do app para decisões maiores</h4>
+            <p>Se vários cômodos aparecem mal cobertos em varreduras sucessivas, o mapa também ajuda a decidir onde vale a pena investir em um roteador mesh adicional.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap foot-row">
+    <div class="foot-brand"><span class="led" aria-hidden="true"></span> SONDA — roteador com sensor ultrassônico e app de mapeamento de rede</div>
+    <p>Feito para mostrar o que o Wi-Fi não consegue dizer sozinho.</p>
+  </div>
+</footer>
+
+<script>
+(function(){
+  const runBtn = document.getElementById('run-btn');
+  const fill = document.getElementById('progress-fill');
+  const verdictBox = document.getElementById('verdict-box');
+  const verdictDot = document.getElementById('verdict-dot');
+  const verdictTitle = document.getElementById('verdict-title');
+  const verdictSub = document.getElementById('verdict-sub');
+  const roomsVal = document.getElementById('rooms-val');
+  const obstaclesVal = document.getElementById('obstacles-val');
+  const worstVal = document.getElementById('worst-val');
+  const scanSummary = document.getElementById('scan-summary');
+
+  const rooms = [
+    { dot: 'dot-sala',       line: null,               verdict: 'good', delay: 150,  name: 'Sala' },
+    { dot: 'dot-quarto1',    line: 'line-quarto1',      verdict: 'good', delay: 650,  name: 'Quarto 1' },
+    { dot: 'dot-cozinha',    line: 'line-cozinha',      verdict: 'warn', delay: 1200, name: 'Cozinha' },
+    { dot: 'dot-quarto2',    line: 'line-quarto2',      verdict: 'bad',  delay: 1750, name: 'Quarto 2' },
+    { dot: 'dot-escritorio', line: 'line-escritorio',   verdict: 'bad',  delay: 2300, name: 'Escritório' }
+  ];
+
+  const verdictCopy = {
+    scanning: { bg: 'var(--accent-dim)', border: 'var(--accent-line)', dot: 'var(--accent)',
+      title: 'Varrendo…', sub: 'O sensor está girando e cruzando distância com força de sinal.' },
+    done: { bg: 'var(--warn-dim)', border: '#C7761840', dot: 'var(--warn)',
+      title: '3 obstáculos encontrados', sub: 'Vidro no Quarto 2, concreto no Escritório e um micro-ondas ativo na Cozinha — veja as causas comuns abaixo.' }
+  };
+
+  function setVerdict(kind){
+    const v = verdictCopy[kind];
+    verdictBox.style.background = v.bg;
+    verdictBox.style.borderColor = v.border;
+    verdictDot.style.background = v.dot;
+    verdictTitle.textContent = v.title;
+    verdictSub.textContent = v.sub;
+  }
+
+  function prepLine(id){
+    const el = document.getElementById(id);
+    if(!el) return;
+    const len = el.getTotalLength();
+    el.style.strokeDasharray = len;
+    el.style.strokeDashoffset = len;
+    el.style.transition = 'none';
+  }
+
+  function drawLine(id){
+    const el = document.getElementById(id);
+    if(!el) return;
+    el.style.transition = 'stroke-dashoffset .6s ease-out';
+    el.style.strokeDashoffset = '0';
+  }
+
+  let running = false;
+
+  runBtn.addEventListener('click', function(){
+    if (running) return;
+    running = true;
+    runBtn.textContent = 'Varrendo…';
+    runBtn.disabled = true;
+    fill.style.width = '0%';
+    roomsVal.textContent = '0';
+    obstaclesVal.textContent = '0';
+    worstVal.textContent = '—';
+    scanSummary.textContent = '';
+    setVerdict('scanning');
+
+    rooms.forEach(r => {
+      const dotEl = document.getElementById(r.dot);
+      dotEl.classList.remove('good','warn','bad');
+      if(r.line) prepLine(r.line);
+    });
+
+    const totalDuration = 2700;
+    const start = performance.now();
+    function tickProgress(now){
+      const elapsed = now - start;
+      const pct = Math.min(elapsed / totalDuration, 1) * 100;
+      fill.style.width = pct + '%';
+      if (pct < 100) requestAnimationFrame(tickProgress);
+    }
+    requestAnimationFrame(tickProgress);
+
+    let mapped = 0;
+    let obstacles = 0;
+
+    rooms.forEach(r => {
+      setTimeout(() => {
+        if (r.line) drawLine(r.line);
+        const dotEl = document.getElementById(r.dot);
+        dotEl.classList.add(r.verdict);
+        mapped++;
+        roomsVal.textContent = mapped;
+        if (r.verdict !== 'good') {
+          obstacles++;
+          obstaclesVal.textContent = obstacles;
+        }
+        if (r.verdict === 'bad') {
+          worstVal.textContent = r.name;
+        }
+      }, r.delay);
+    });
+
+    setTimeout(() => {
+      setVerdict('done');
+      runBtn.textContent = 'Varrer novamente';
+      runBtn.disabled = false;
+      running = false;
+      scanSummary.textContent = 'Varredura concluída: 5 cômodos mapeados, 3 obstáculos encontrados. Pior cômodo: Escritório.';
+    }, totalDuration + 150);
+  });
+})();
+</script>
+
+</body>
+</html>
